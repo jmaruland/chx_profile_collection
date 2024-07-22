@@ -39,31 +39,33 @@ def xpcs_count(detectors, *, md=None):
 
     return (yield from inner_xpcs())
 
-def move_E(energy, gap=[], xtal="Si111cryo", gapmode="auto", harm=5):
+def move_E(energy, gap=[], xtal="Si111cryo", gapmode="auto", harm=5, gap_offset=0):
 	"""
 	change beamline energy: moving both Bragg axis and gap of IVU
-	calling sequence: move_E(energy, gap=[], xtal="Si111cryo", gapmode="auto", harm=5)
+	calling sequence: move_E(energy, gap=[], xtal="Si111cryo", gapmode="auto", harm=5, gap_offset=0)
 	energy: scalar!; X-ray energy in [keV] & xtal define the Bragg angle via xf.get_Bragg()
 	gap: manually entered gap value with gapmode="manual" OR calculated from xf.get_gap(energy, harm, default id map) with gapmode="auto"
 	note: currently only DCM (not DMM) is implemented
 	to-do: need PV that reflects crystal selection -> new default: xtal='current' -> using whatever xtal is currently in the beam
 	to-do: with PV above, change xtal if selected xtal is not the currently inserted one
+	gap_offset: known offset between actual gap and ID lookup table, May 2024: gap_offset=-25
 	"""
-	th_B=-1*get_Bragg(xtal,energy)[0]  #use xf.get_Bragg once the package is fixed
+	if type(energy) in [float,int]:
+		energy=[energy]
+	th_B=-1*xf.get_Bragg(xtal,energy)[0][0]  # changed this line after ensuring that energy is a list...
 	if gapmode == "manual":
 		if len([gap]) == len([energy])==1:
 			gap = gap
 			print('using manually entered gap value...')
 		else: print('error: function accepts only one energy and one gap value at a time')
 	elif gapmode =="auto":
-		gap=xf.get_gap(energy,harmonic=harm)
+		gap=xf.get_gap(energy,harmonic=harm)[0]+gap_offset   # changed this line after ensuring that energy is a list...
 		print('using calculated gap value from xfuncs!')
 	print('moving ivu_gap to '+str(gap)[:6]+'mm   and dcm.b to '+str(th_B)[:6]+'deg')
 	RE(mov(ivu_gap,gap,dcm.b,th_B))
-	#ivu_gap.move(gap)	
-	#dcm.b.move(th_B)
 	print('Done! New X-ray energy is '+ str(dcm.en.user_readback.value/1000)+'keV')
 	
+
 
 def E_scan(energy, gap=[], xtal="Si111cryo", gapmode="auto",harm=5, det=elm.sum_all): 
 	"""
@@ -107,14 +109,14 @@ def Energy_scan(energy, gap=[], xtal="Si111cryo", gapmode="auto",harm=5, det=[ei
     Energy_scan(energy, gap=[], xtal="Si111cryo", gapmode="auto",harm=5, det=[eiger1m_single]):
     energy scan: Scanning both Bragg axis and gap of IVU in a linked fashion
 	calling sequence: E_scan(energy, gap=[], xtal="Si111cryo", gapmode="auto", harm=5 det=elm.sum_all.value)
-	energy: X-ray energy in [keV] & xtal define the Bragg angles used in the scan via xf.get_Bragg()
+	energy: np.array!!! ;X-ray energy in [keV] & xtal define the Bragg angles used in the scan via xf.get_Bragg()
 	gap: manually entered list of gap values with gapmode="manual" OR calculated from xf.get_gap(energy, harm, default id map) with gapmode="auto"
 	to-do: allow detector selection from 'detselect()'
 	by LW June 2016	
 	"""
 	from cycler import cycler
 	#from bluesky import PlanND
-	th_B=list(-1*xf.get_Bragg(xtal,energy)[:,0])
+	th_B=list(-1*xf.get_Bragg(xtal,energy.tolist())[:,0])
 	print('th_B :',th_B)
 	if gapmode == "manual":
 		if len(gap) == len(energy):
@@ -122,7 +124,7 @@ def Energy_scan(energy, gap=[], xtal="Si111cryo", gapmode="auto",harm=5, det=[ei
 			print('using manually entered gap values...')
 		else: print('error: length of manually entered list of gap value does not match number of energy points')
 	elif gapmode =="auto":
-		gap=list(xf.get_gap(energy,harmonic=harm))  
+		gap=list(xf.get_gap(energy.tolist(),harmonic=harm))  
 		print('using calculated gap values from xfuncs!')
 		print(gap)
 	inner = cycler(dcm.b,th_B)+cycler(ivu_gap,gap)
