@@ -161,8 +161,10 @@ class EigerSimulatedFilePlugin(Device, FileStoreBase):
     def stage(self):
         res_uid = new_short_uid()
         write_path = datetime.now().strftime(self.write_path_template)
-        set_and_wait(self.file_path, write_path + '/')
-        set_and_wait(self.file_write_name_pattern, '{}_$id'.format(res_uid))
+        #set_and_wait(self.file_path, write_path + '/')
+        self.file_path.set(write_path + '/').wait()
+        #set_and_wait(self.file_write_name_pattern, '{}_$id'.format(res_uid))
+        self.file_write_name_pattern.set('{}_$id'.format(res_uid)).wait()
         super().stage()
         fn = (PurePath(self.file_path.get()) / res_uid)
         ipf = int(self.file_write_images_per_file.get())
@@ -229,11 +231,12 @@ class EigerBase(AreaDetector):
         # before parent
         ret = super().stage(*args, **kwargs)
         # after parent
-        set_and_wait(self.manual_trigger, 1)
+        self.manual_trigger.set(1).wait()
         return ret
 
     def unstage(self):
-        set_and_wait(self.manual_trigger, 0)
+        #set_and_wait(self.manual_trigger, 0)
+        self.manual_trigger.set(0).wait()
         super().unstage()
 
     @property
@@ -350,7 +353,8 @@ class EigerSingleTrigger_AD37(SingleTrigger, EigerBaseV33):
 
     def trigger(self, *args, **kwargs):
         status = super().trigger(*args, **kwargs)
-        set_and_wait(self.special_trigger_button, 1)
+        #set_and_wait(self.special_trigger_button, 1)
+        self.special_trigger_button.set(1).wait()
         return status
 
     def read(self, *args, streaming=False, **kwargs):
@@ -512,7 +516,7 @@ xray_eye1 = StandardProsilicaV33('XF:11IDA-BI{Bpm:1-Cam:1}', name='xray_eye1')
 xray_eye2 = StandardProsilicaV33('XF:11IDB-BI{Mon:1-Cam:1}', name='xray_eye2')
 xray_eye3 = StandardProsilicaV33('XF:11IDB-BI{Cam:08}', name='xray_eye3')
 xray_eye4 = StandardProsilicaV33('XF:11IDB-BI{Cam:09}', name='xray_eye4')
-OAV = StandardProsilicaV33('XF:11IDB-BI{Cam:10}', name='OAV')
+OAV = StandardProsilicaV33('XF:11IDB-BI{Cam:10}', name='OAV')  # beamline OAV using prosilica camera
 #OAV = StandardProsilicaV33('XF:11ID-M3{Det-Cam:3}', name='OAV')  # printer OAV using Grasshoper UBS3 camera
 #OAV.stage_sigs[OAV.cam.trigger_mode] = 'Off'
 
@@ -522,7 +526,7 @@ xray_eye1_writing = StandardProsilicaWithTIFFV33('XF:11IDA-BI{Bpm:1-Cam:1}', nam
 xray_eye2_writing = StandardProsilicaWithTIFFV33('XF:11IDB-BI{Mon:1-Cam:1}', name='xray_eye2')
 xray_eye3_writing = StandardProsilicaWithTIFFV33('XF:11IDB-BI{Cam:08}', name='xray_eye3')
 xray_eye4_writing = StandardProsilicaWithTIFFV33('XF:11IDB-BI{Cam:09}', name='xray_eye4')
-OAV_writing = StandardProsilicaWithTIFFV33('XF:11IDB-BI{Cam:10}', name='OAV')
+OAV_writing = StandardProsilicaWithTIFFV33('XF:11IDB-BI{Cam:10}', name='OAV')   # beamline OAV using prosilica camera
 #OAV_writing = StandardProsilicaWithTIFFV33('XF:11ID-M3{Det-Cam:3}', name='OAV') # printer OAV using Grasshoper UBS3 camera
 OAV_writing.tiff.write_path_template = '/nsls2/data/chx/legacy/data/%Y/%m/%d/'
 OAV_writing.tiff.read_path_template = '/nsls2/data/chx/legacy/data/%Y/%m/%d/'

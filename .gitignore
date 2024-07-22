@@ -71,3 +71,6 @@ profile_default
 
 fontconfig
 zz-dama.py
+
+# Jupyter Notebook Checkpoint
+.ipynb_checkpoints/

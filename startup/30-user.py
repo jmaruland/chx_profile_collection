@@ -556,8 +556,8 @@ def wait_for_pv(dets, ready_signal,feedback_on=False ,md=None):
         trigger_ready() # let the world know: ready to be triggered
         while still_waiting():
             yield from bps.sleep(.01)
-        if feedback_on:
-            yield from prep_series_feedback()
+        # if feedback_on:
+        #     yield from prep_series_feedback() # LW 03/2024: no longer needed, feedback is always on
         yield from bps.trigger_and_read(dets)        
     yield from inner()
     
@@ -698,7 +698,7 @@ def DBPM_feedback(chan_A=True,chan_B=True,xtol=.3,ytol=.3,max_retry=3,stop_on_er
     RE(mv(hdm_feedback_selector, 0)) # encoder feedback on hdm OFF
     for i in range(max_retry):
         if verbose:
-            print('try #%s in_position: %s feedback_possible: %s pid_loop_running: %s'%(i,in_position,feedback_possible,pid_loop_check))
+            print('try #%s in_position: %s feedback_possible: %s pid_loop_running: %s'%(i,in_position,feedback_possible,pid_loop_running))
         if (not in_position) and feedback_possible and pid_loop_running:
             if 'a' in pos_list:
                 RE(mv(bpm2_feedback_selector_a, 0));RE(sleep(.5))
@@ -759,7 +759,6 @@ def series(det='eiger4m',shutter_mode='single',expt=.1,acqp='auto',imnum=5,comme
     add auto-comment: comment='descr1'+'AUTO_COMMENT'+'descr2' -> 'descr1 expt=xxxs, imnum=yyyy, Trans= zzz sample: RE.md['sample'] descr2
     auto_beam_position: if True, updates PVs for direct beam position based on reference positions in RE.md['beam_position_dict'] and current detector position
     """
-        
     # Define trigger PV (use is optional)
     #caput('XF:11ID-CT{ES:1}bo2',1)
     #trigger_pv='XF:11ID-CT{ES:1}bi3'
@@ -844,7 +843,7 @@ def series(det='eiger4m',shutter_mode='single',expt=.1,acqp='auto',imnum=5,comme
     #md_series={'exposure time':str(expt), 'acquire period':str(acqp),'shutter mode':shutter_mode,'number of images':str(imnum),'data path':idpath,'sequence id':str(seqid),
                   #'transmission':transmission,'OAV_mode':OAV_mode,'T_yoke':T_yoke,'T_sample':T_sample,'analysis':analysis,'feedback_x':fx,'feedback_y':fy}
     #Xiao added 'T_sample_stinger'
-    md_series={'exposure time':str(expt), 'acquire period':str(acqp),'shutter mode':shutter_mode,'number of images':str(imnum),'data path':idpath,'sequence id':str(seqid),
+    md_series={'XPCS_data':True,'exposure time':str(expt), 'acquire period':str(acqp),'shutter mode':shutter_mode,'number of images':str(imnum),'data path':idpath,'sequence id':str(seqid),
                   'transmission':transmission,'OAV_mode':OAV_mode,'T_yoke':T_yoke,'T_sample':T_sample,'T_sample_stinger':T_sample_stinger,'analysis':analysis,'feedback_x':fx,'feedback_y':fy}
 
     ## end series specific metadata
@@ -939,7 +938,7 @@ def series(det='eiger4m',shutter_mode='single',expt=.1,acqp='auto',imnum=5,comme
             #uid_add=db[-scan_add]['start']['uid']
             uid_add=db[-1]['start']['uid']
             uid_list=data_acquisition_collection.find_one({'_id':'general_list'})['uid_list']
-            uid_list.append(uid_add)
+            uid_list.append(uid_add)          
             data_acquisition_collection.update_one({'_id': 'general_list'},{'$set':{'uid_list' : uid_list}})
             print('Added uid %s to list for automatic compression!'%uid_add)
         except:
@@ -1242,8 +1241,12 @@ class Peltier_Cooler(Device):
     enable_command = Cpt(EpicsSignal, 'B-ES{Pel-IO:1}DO:1-Cmd')
     enable_status = Cpt(EpicsSignal, 'B-ES{Pel-IO:1}DO:1-Sts')
     set_power_command = Cpt(EpicsSignal, '-CT{Peltier:1}ai2')
-    #close_command = Cpt(EpicsSignal, 'Cmd:Cls-Cmd')
-    #close_status = Cpt(EpicsSignal, 'Cmd:Cls-Sts')
+    setup_power = Cpt(EpicsSignal, '-CT{Peltier:1}ai2.DESC')
+    setup_hot_side_max = Cpt(EpicsSignal, '-CT{Peltier:1}ai3.DESC')
+    set_hot_side_max = Cpt(EpicsSignal, '-CT{Peltier:1}ai3')
+    setup_chiller_temperature = Cpt(EpicsSignal, '-CT{Peltier:1}ai1.DESC')
+    set_chiller_temperature = Cpt(EpicsSignal, '-CT{Peltier:1}ai1')
+    setup_peltier_enabled = Cpt(EpicsSignal, '-CT{Peltier:1}bi9.DESC')
 
     def enable(self):
         self.enable_command.put(1)
@@ -1259,6 +1262,23 @@ class Peltier_Cooler(Device):
         
     def status(self):
         return print('Peltier enabled: %s   Peltier Power: %s percent'%(bool(self.enable_status.get()),self.set_power_command.get()))
+    
+    def setup(self):
+        self.setup_chiller_temperature.put('chiller temp. [12-22C]')
+        self.set_chiller_temperature.put(22)
+        self.setup_power.put('Peltier Power [0-100%]')
+        self.set_power_command.put(0)
+        self.setup_hot_side_max.put('Pel. hot side max T [C]')
+        self.set_hot_side_max.put(17.5)
+        self.setup_peltier_enabled.put('Peltier ENABLED')
+    
+    def chiller_temperature(self,T):
+        self.set_chiller_temperature.put(T)
+        print('Chiller temperature set to: %s [C]'%T)
+
+
+
+
 
 peltier = Peltier_Cooler('XF:11ID',name='peltier')
 
@@ -1349,6 +1369,7 @@ def set_temperature(Tsetpoint,heat_ramp=3,cool_ramp=0,log_entry='on',check_vac=T
         caput('XF:11IDB-ES{Env:01-Out:2}Enbl:Ramp-Sel',1,wait=True)
         caput('XF:11IDB-ES{Env:01-Out:1}T-SP',273.15+Tsetpoint)    # setting channel C to Tsetpoint
         caput('XF:11IDB-ES{Env:01-Out:2}T-SP',233.15+Tsetpoint) # setting channel B to Tsetpoint-40C
+    RE(sleep(60)) # some things are notoriously slow to update, this sleep ensures that wait_temperature() is waiting for the correct target temperature
 
 
 # wait for temperature NOT TESTED YET
@@ -1770,6 +1791,7 @@ def WAXS_rotation(angle):
     '''
     moves SAXS table's WAXS section to desired rotation angle in 2 deg steps, using lookup table for positions and X2 velocity
     WAXS_rotation(angle) -> angle [deg.]
+    checks that 470 < z2 < 500 & z1<20 
     '''
     max_angle=14.1 #hard coded limit for current setup    
     [WAXS_angle,x1_pos,x2_pos,x2_velocity]=WAXS_rot_setup()
@@ -1787,24 +1809,34 @@ def WAXS_rotation(angle):
         direction=-1
     print('going to move WAXS section from '+str(curr_WAXS_angle)+' to: '+str(angle))
     while abs(angle - curr_WAXS_angle) > 1:        # moving in 1 deg steps
-        curr_velocity= np.interp((curr_WAXS_angle+direction*.5),WAXS_angle,x2_velocity)
-        curr_X1=np.interp((curr_WAXS_angle+direction*1),WAXS_angle,x1_pos)
-        curr_X2=np.interp((curr_WAXS_angle+direction*1),WAXS_angle,x2_pos)
-        print('moving to: '+str(curr_WAXS_angle+direction*1)+' setting X2 velocity to '+str(curr_velocity)+'  X1 -> '+str(curr_X1)+'  X2 -> '+str(curr_X2))
-        # need to do the actual moves here:
-        SAXS_x2.velocity.value=curr_velocity
-        RE(mv(SAXS_x1,curr_X1,SAXS_x2,curr_X2))
-        #mov([SAXS_x1,SAXS_x2],[curr_X1,curr_X2])
-        curr_WAXS_angle=WAXS_rot_pos()        # the real thing...
-        #curr_WAXS_angle=curr_WAXS_angle+direction*1 #faking move for testing
+        z2=caget('XF:11IDB-ES{Tbl:SAXS-Ax:Z2}Mtr.RBV')
+        z1=caget('XF:11IDB-ES{Tbl:SAXS-Ax:Z1}Mtr.RBV')
+        if z2>470 and z2<500 and z1<20:
+            curr_velocity= np.interp((curr_WAXS_angle+direction*.5),WAXS_angle,x2_velocity)
+            curr_X1=np.interp((curr_WAXS_angle+direction*1),WAXS_angle,x1_pos)
+            curr_X2=np.interp((curr_WAXS_angle+direction*1),WAXS_angle,x2_pos)
+            print('moving to: '+str(curr_WAXS_angle+direction*1)+' setting X2 velocity to '+str(curr_velocity)+'  X1 -> '+str(curr_X1)+'  X2 -> '+str(curr_X2))
+            # need to do the actual moves here:
+            SAXS_x2.velocity.value=curr_velocity
+            RE(mv(SAXS_x1,curr_X1,SAXS_x2,curr_X2))
+            #mov([SAXS_x1,SAXS_x2],[curr_X1,curr_X2])
+            curr_WAXS_angle=WAXS_rot_pos()        # the real thing...
+            #curr_WAXS_angle=curr_WAXS_angle+direction*1 #faking move for testing
+        else:
+            raise Exception('ERROR: need 470 < z2 < 500 & z1<20 to do rotation')
     # moving the balance:
     if abs(angle - curr_WAXS_angle) <1.2:
-        curr_X1=np.interp(angle,WAXS_angle,x1_pos)
-        curr_X2=np.interp(angle,WAXS_angle,x2_pos)
-        print('moving to: '+str(angle)+'  X1 -> '+str(curr_X1)+'  X2 -> '+str(curr_X2))    
-        # need to do the actual move here:
-        #mov([SAXS_x1,SAXS_x2],[curr_X1,curr_X2])
-        RE(mv(SAXS_x1,curr_X1,SAXS_x2,curr_X2))
+        z2=caget('XF:11IDB-ES{Tbl:SAXS-Ax:Z2}Mtr.RBV')
+        z1=caget('XF:11IDB-ES{Tbl:SAXS-Ax:Z1}Mtr.RBV')
+        if z2>470 and z2<500 and z1<20:
+            curr_X1=np.interp(angle,WAXS_angle,x1_pos)
+            curr_X2=np.interp(angle,WAXS_angle,x2_pos)
+            print('moving to: '+str(angle)+'  X1 -> '+str(curr_X1)+'  X2 -> '+str(curr_X2))    
+            # need to do the actual move here:
+            #mov([SAXS_x1,SAXS_x2],[curr_X1,curr_X2])
+            RE(mv(SAXS_x1,curr_X1,SAXS_x2,curr_X2))
+        else:
+            raise Exception('ERROR: need 470 < z2 < 500 & z1<20 to do rotation')
     else: raise rotation_exception('error: discrepancy from where the rotation is expected to be....')
 
 
@@ -1859,12 +1891,15 @@ gn2_close = 'XF:11IDB-ES{Sample-AV:GN2}Cmd:Cls-Cmd'
 gn2_open = 'XF:11IDB-ES{Sample-AV:GN2}Cmd:Opn-Cmd'
 tgv_open = 'XF:11IDB-ES{Sample-GV:Turbo}Cmd:Opn-Cmd'
 tgv_close = 'XF:11IDB-ES{Sample-GV:Turbo}Cmd:Cls-Cmd'
+cryo_close = 'XF:11IDB-ES{Sample-GV:Cryo}Cmd:Cls-Cmd' 
 
 turbo_on = 'XF:11IDB-ES{SampleVacuum}TurboEnable'
 pump_on = 'XF:11IDB-ES{SampleVacuum}BackingEnable'
 
 vac_pv = 'XF:11IDB-VA{Samp:1-TCG:1}P-I'
 T_pv = 'XF:11IDB-ES{Env:01-Chan:C}T:C-I'
+T_A = 'XF:11IDB-ES{Env:01-Chan:A}T:C-I'
+T_min = 15
 
 T_thresh = 85
 
@@ -1897,6 +1932,9 @@ def auto_pump():
 
 def auto_vent():
     if caget(T_pv) < T_thresh:
+    #if caget(T_A) > T_min:
+        #turning off the cryo GV 
+        caput(cryo_close,1)
         caput(tgv_close,1)
         caput(turbo_on,0)
         RE(sleep(10))

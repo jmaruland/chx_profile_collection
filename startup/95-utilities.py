@@ -19,6 +19,241 @@ from lmfit import  Model
 from lmfit import minimize, Parameters, Parameter, report_fit
 from scipy.special import erf
 
+from zoneinfo import ZoneInfo
+import json, re, os
+from termcolor import colored
+
+from IPython.display import clear_output
+
+def check_roi_masknames(path='/nsls2/data/chx/shared/CHX_Setup/Detector_masks/ROI_masks',verbose=False):
+    files_ = [f for f in os.listdir(path) if re.match('general_', f) and f.split('.')[1]=='json']
+    files=[]
+    for f in files_:
+        files.append(f.split('general_roi_mask_')[1].split('.')[0])
+    if verbose:
+        print('available Q-Phi ROI masks: %s'%files)
+    return files
+
+
+
+################ set of functions to manage metadata #####################
+def compare_dicts(dict1,dict2,key_list):
+    """
+    support function for manage_metadata()
+    creates a new dictionary comp_dict that for each k in key_list has the key, value of dict1, value of dict2 IF k in dict1.keys().
+    LW 02/26/2024
+    """
+    comp_dict={}
+    for k in key_list:
+        try: 
+            comp_dict[k]={'original':dict1[k],'backup':dict2[k]}
+        except:
+            pass
+    return comp_dict
+
+def backup_md(md_dict,backup_dict_path,md_filename,verbose=False):
+    """
+    support function for manage_metadata()
+    dumps dictionary as json file
+    creates directory specified as backup_dict_path IF it does not exist
+    backup_md(md_dict,backup_dict_path,md_filename,verbose=False)
+    LW 02/26/2024
+    """
+    #create filename
+    t=str(datetime.now(ZoneInfo("America/New_York"))) # remove one datetime for beamline...
+    json_filename = backup_dict_path+md_filename+t.split()[0]+'_%s_%s_%s.json'%(t.split()[1].split(':')[0],t.split()[1].split(':')[1],t.split()[1].split(':')[2].split('.')[0])
+
+    if not os.path.exists(backup_dict_path):
+        os.makedirs(backup_dict_path)
+    md_dict['backup_epoch']=time.time()
+    with open(json_filename, "w") as outfile:
+        json.dump(json.dumps(md_dict), outfile)
+    if verbose:
+        print('saved metadata backup file as ',json_filename)
+
+def list_md_backups(backup_dict_path,md_filename,newest_first=True,max_number=None):
+    """
+    support function for manage_metadata()
+    list_md_backups(backup_dict_path,md_filename,newest_first=True)
+    lists available metadata backups in specified directory, ordered by time
+    md_filename is the template name, currently 'CHX_md_backup_'
+    newest_first=True: latest backup is top of the list (False: oldest backup is top of the list)
+    LW 02/26/2024
+    """
+    files_ = [f for f in os.listdir(path=backup_dict_path) if re.match(md_filename, f) and f.split('.')[1]=='json']
+    md_epoch_dict={};md_timestr_dict={}
+    for f in files_:
+        fn = open(backup_dict_path+f)
+        tmp_ = json.load(fn);fn.close()
+        tmp = json.loads(tmp_);del tmp_
+        tstring=str(datetime.fromtimestamp(tmp['backup_epoch'])).split('.')[0]
+        md_epoch_dict[tmp['backup_epoch']]={'time_str':tstring,'filename':f}
+        md_timestr_dict[tstring]=f
+    del tmp;select_dict = {}
+    print('#     backup time     ->       backup filename')
+    for tt,t in enumerate(sorted(list(md_epoch_dict.keys()),reverse=newest_first)[:max_number]):
+        select_dict[tt+1]={'time_str':md_epoch_dict[t]['time_str'],'filename':md_epoch_dict[t]['filename'].split('.')[0]}
+        print('%s   %s -> %s'%(tt+1,select_dict[tt+1]['time_str'],select_dict[tt+1]['filename']))
+    return select_dict
+95
+def manage_metadata(action=None,verbose=True,**kwargs):
+    """
+    function to manage beamline metadata dictionary
+    manage_metadata(action=None,verbose=True,**kwargs)
+    action
+    None:   - list standard keys
+            - default dict
+            - WARNING: missing standard keys in current metadata dict
+            - list of user metadata keys that could be removed 
+    'remove_user_keys': - list user md that can be removed, asks for confirmation to remvove it
+                        - creates a backup prior to removing md
+    'md_backup':  save current metadata dictionary as json file
+    'set_default_values':   - save current metadata dictionary as json file
+                            - set keys in default dict to standard values
+    'restore_md':   - show available backup files, ordered by date
+                    - interactively select backup to be restored 
+                    - interactively check which metadata to restore for standard and user metadata, show values that would be restored
+                    - IF any modifications are made to the current metadata dictionary, save a backup first as json file
+    optional keywords with action='restore_md':
+    - newest_first = True/False -> if True: list newest backup files first
+    - max_number = integer or None -> maximum number of available backup files shown; if None: show all
+    LW 02/26/2024
+    """    
+    backup_dict_path = '/home/xf11id/CHX_metadata_backups/'
+    md_filename = 'CHX_md_backup_'
+    # what to do with data session? what's the default?
+    keep_list = ['scan_id','cycle','sample','auto_pipeline','beam_position_dict','OAV_resolution [um_pixel]','data_session','beamline_id','owner','user','user_group']
+    default_dict = {'sample':'none','auto_pipeline':'none','OAV_resolution [um_pixel]':'N.A.','user':'CHX_staff','user_group':[]}
+    
+    md_dict=dict(RE.md)
+    current_list = list(md_dict.keys())
+    
+    if action is None or action == 'remove_user_keys': 
+        warn_list = []
+        for k in keep_list:
+            if k not in current_list:
+                warn_list.append(k)
+        user_list = []
+        for k in current_list:
+            if k not in keep_list:
+                user_list.append(k)
+    if action is None:
+        print(colored('standard metadata keys that cannot be removed: ','green'),'\n%s\n'%keep_list)
+        print(colored('user metadata keys that could be removed: ','green'),'\n%s\n'%user_list)
+        if len(warn_list)>0:
+            print(colored('WARNING: mandatory standard metadata keys that are currently missing: \n%s\n'%warn_list,'yellow'))
+        print(colored('defaults that can be assigned to a subset of metadata keys: ','green'),'\n%s\n'%default_dict)
+    
+    if action == 'remove_user_keys':
+        print(colored('WARNING: user metadata keys that will be removed: \n%s\n'%user_list,'yellow'))
+        confirm=False
+        print(colored('ATTENTION: remove user metadata keys listed above? yes/no: ','red'));confirm = input()
+        if confirm == 'yes':
+            backup_md(md_dict,backup_dict_path,md_filename,verbose=True)
+            for u in user_list:
+                del RE.md[u]    
+        else:
+            print(colored('abort: no user keys have been removed','yellow'))
+        if len(warn_list)>0: #courtesy warning, nothing to do with removing user keys
+            print(colored('WARNING: mandatory standard metadata keys that are currently missing: \n%s\n'%warn_list,'yellow'))
+               
+    if action == 'md_backup':
+        backup_md(md_dict,backup_dict_path,md_filename,verbose=verbose)
+    
+    if action == 'set_default_values':
+        print('will set standard keys from current value to default values:\n',colored('    key:        current value     ->      default value','green'))
+        for k in list(default_dict.keys()):
+            try:
+                is_value = md_dict[k]
+            except:
+                is_value = None
+            print('%s:   %s      ->      %s'%(k,is_value,default_dict[k]))
+        confirm=False
+        print(colored('ATTENTION: reset standard metadata keys with defaults listed above? yes/no: ','red'));confirm = input()
+        if confirm == 'yes':
+            backup_md(md_dict,backup_dict_path,md_filename,verbose=True)
+            for k in list(default_dict.keys()):
+                RE.md[k] = default_dict[k]
+        else:
+            print(colored('abort: no standard metadata keys have been reset to dafaults','yellow'))
+        warn_list = []
+        for k in keep_list:
+            if k not in list(md_dict.keys()):
+                warn_list.append(k)
+        if len(warn_list)>0: #courtesy warning, nothing to do with removing user keys
+            print(colored('WARNING: mandatory standard metadata keys that are currently missing: \n%s\n'%warn_list,'yellow'))
+    
+    if action == 'restore_md':
+        newest_first=True;max_number=None
+        print('Available metadata backups that could be restored: ')
+        if 'newest_first' in kwargs:
+            if kwargs['newest_first'] in [True,False]:
+                newest_first=kwargs['newest_first']
+        if 'max_number' in kwargs:
+            if type(kwargs['max_number'])==int or kwargs['max_number'] == None:
+                max_number = kwargs['max_number']
+        select_dict = list_md_backups(backup_dict_path,md_filename,newest_first=newest_first,max_number=max_number)
+        print(colored('Selection: either use backup # (int) or backup filename','green'));fn_=input()
+        try: # if fn_ is integer...but it's coming back anyways as str from input()
+            fn=backup_dict_path+select_dict[int(fn_)]['filename']+'.json'
+        except: fn=backup_dict_path+fn_+'.json'
+        try:
+            f = open(fn)  ### load json file
+            tmp = json.load(f);f.close()
+            backup_dict=json.loads(tmp);del tmp
+        except:
+            print(colored('ERROR: selected backup file %s could not be loaded....'%fn,'red'))
+        print('content of selected backup: ',backup_dict)
+        backed_up = False # IF any modifications will be made to the current metadata, do a backup first!
+        standard_dict = compare_dicts(dict1=md_dict,dict2=backup_dict,key_list=keep_list)
+        user_list_backup = [i for i in list(backup_dict.keys()) if i not in keep_list]
+        user_list_dict = {}
+        for k in user_list_backup:
+            if  k not in ['backup_epoch']:
+                try: org=md_dict[k]
+                except: org=None
+                user_list_dict[k]={'original':org,'backup':backup_dict[k]}
+
+        # restore user metadata
+        print(colored('User metadata that can be restored:\n  key:      current    ->      backup','green'))
+        for u in list(user_list_dict.keys()):
+            print('%s    %s   ->   %s'%(u,user_list_dict[u]['original'],user_list_dict[u]['backup']))
+        print(colored('Restore user metadata from backup? yes/no:','red'));confirm=False;confirm=input()
+        if confirm == 'yes':
+            if not backed_up:
+                backup_md(md_dict,backup_dict_path,md_filename,verbose=verbose);backed_up=True
+            for k in list(user_list_dict.keys()):
+                RE.md[k]=user_list_dict[k]['backup']
+        else:
+            print(colored('user metadata has NOT been restored','yellow'))
+        clear_output()
+        print(colored('standard metadata that can be restored:\n  key:      current    ->      backup','green'))
+        for u in list(standard_dict.keys()):
+            print('%s    %s   ->   %s'%(u,standard_dict[u]['original'],standard_dict[u]['backup']))
+        print(colored("Restore standard metadata from backup? Be sure you know what you're doing... yes/no:",'red'));confirm=False;confirm=input()    
+        if confirm == 'yes':
+            if not backed_up:
+                backup_md(md_dict,backup_dict_path,md_filename,verbose=verbose);backed_up=True
+            for k in list(standard_dict.keys()):
+                RE.md[k]=standard_dict[k]['backup']
+        else:
+            print(colored('Standard metadata has NOT been restored','yellow'))
+        
+        warn_list = []
+        for k in keep_list:
+            if k not in list(md_dict.keys()):
+                warn_list.append(k)
+        if len(warn_list)>0: #courtesy warning, nothing to do with removing user keys
+            print(colored('WARNING: mandatory standard metadata keys that are currently missing: \n%s\n'%warn_list,'yellow'))
+    elif action not in [None, 'remove_user_keys', 'md_backup', 'set_default_values', 'restore_md']: print(colored("ERROR: 'action' argument must be one of [None, 'remove_user_keys', 'md_backup', 'set_default_values', 'restore_md']",'red'))
+
+
+##########################################################################
+
+
+
+
+
 import itertools 
 markers =  ['o',   'H', 'D', 'v',  '^', '<',  '>', 'p',
                 's',  'h',   '*', 'd', 

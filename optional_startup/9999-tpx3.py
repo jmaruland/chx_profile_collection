@@ -159,7 +159,6 @@ class TimePixDetector(SingleTriggerV33, AreaDetector):
         yield from bps.mv(self.cam.acquire_time, real_exp)
         yield from self.set_num_images(num_frames)            
 
-"""
 tpx3 = TimePixDetector("TPX3-TEST:", name="tpx3")
 
 for j in range(1, 5):
@@ -167,7 +166,6 @@ for j in range(1, 5):
     stat.kind = 'normal'
     stat.total.kind = 'hinted'
     stat.ts_total.kind = 'normal'
-"""
     
-# for j in [1, 2, 3, 4]:
-#     getattr(tpx3, f'stats{j}').nd_array_port.set(f'ROI{j}')
+for j in [1, 2, 3, 4]:
+    getattr(tpx3, f'stats{j}').nd_array_port.set(f'ROI{j}')
